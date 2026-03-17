@@ -1,15 +1,14 @@
 # ⚛️ orbital
 
-<!--[![Package Version](https://img.shields.io/hexpm/v/orbital)](https://hex.pm/packages/orbital)-->
-<!--[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/orbital/)-->
+[![Package Version](https://img.shields.io/hexpm/v/orbital)](https://hex.pm/packages/orbital)
+[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/orbital/)
 
 Build and flash Gleam projects to devices running [AtomVM](https://atomvm.org).
 
-Add it to your project as a git development dependency by adding the following
-line under `[dev_dependencies]`:
+Add it to your project as a dev dependency:
 
-```toml
-orbital = { git = "https://github.com/giacomocavalieri/orbital", ref = "v1.0.0" }
+```sh
+gleam add --dev orbital
 ```
 
 Your project must have a module with a `start` function that takes no arguments:
