@@ -258,8 +258,15 @@ pub fn usage_text() -> Document {
   |> doc.group
 }
 
-pub fn flash_help_text() -> Document {
+pub fn flash_help_text(description: Bool) -> Document {
   [
+    case description {
+      False -> doc.empty
+      True ->
+        "Build your project into an 'avm' file and flash it to the given device."
+        |> flex_text
+        |> doc.append(doc.lines(2))
+    },
     doc.from_string(
       ansi.magenta("Usage: ")
       <> ansi.green("gleam run -m orbital ")
@@ -293,8 +300,23 @@ pub fn flash_help_text() -> Document {
   |> doc.group
 }
 
-pub fn build_help_text() -> Document {
+pub fn build_help_text(description: Bool) -> Document {
   [
+    case description {
+      False -> doc.empty
+      True ->
+        [
+          flex_text("Build your project into an 'avm' file."),
+          doc.line,
+          flex_text(
+            "This is handy if you need to interact with the 'avm' file with "
+            <> "additional tooling, otherwise you can use the `flash` command "
+            <> "directly.",
+          ),
+        ]
+        |> doc.concat
+        |> doc.append(doc.lines(2))
+    },
     doc.from_string(
       ansi.magenta("Usage: ")
       <> ansi.green("gleam run -m orbital ")
@@ -317,9 +339,9 @@ pub fn build_help_text() -> Document {
 pub fn help_text_for_state(state: ParsingState) -> Document {
   case state {
     ParsingBase -> usage_text()
-    ParsingFlash -> flash_help_text()
+    ParsingFlash -> flash_help_text(False)
     ParsingHelp -> usage_text()
-    ParsingBuild -> build_help_text()
+    ParsingBuild -> build_help_text(False)
   }
 }
 

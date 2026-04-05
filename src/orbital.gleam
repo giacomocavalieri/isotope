@@ -45,12 +45,12 @@ pub fn main() -> Nil {
 
     Ok(cli.Usage) -> print_document(cli.usage_text())
     Ok(cli.Help) -> print_document(cli.usage_text())
-    Ok(cli.Flash(help: True, ..)) -> print_document(cli.flash_help_text())
+    Ok(cli.Flash(help: True, ..)) -> print_document(cli.flash_help_text(True))
     Ok(cli.Flash(help: False, dry_run: True, platform:, port:, baud:)) ->
       flash_dry_run(platform, port, baud)
     Ok(cli.Flash(help: False, dry_run: False, platform:, port:, baud:)) ->
       flash(platform, port, baud)
-    Ok(cli.Build(help: True, ..)) -> print_document(cli.build_help_text())
+    Ok(cli.Build(help: True, ..)) -> print_document(cli.build_help_text(True))
     Ok(cli.Build(output_file:, help: False)) -> build(output_file)
   }
 }
