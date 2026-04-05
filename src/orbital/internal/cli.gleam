@@ -248,7 +248,7 @@ pub fn usage_text() -> Document {
     doc.lines(2),
     doc.from_string(ansi.magenta("Commands:")),
     doc.line,
-    command_line("  build  ", "build your code into an avm file"),
+    command_line("  build  ", "build your code into an 'avm' file"),
     doc.line,
     command_line("  flash  ", "build and flash your code to a device"),
     doc.line,

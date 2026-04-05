@@ -147,10 +147,10 @@ fn do_flash(
   let outcome = {
     use directory <- temporary.create(temporary.directory())
     let output_path = filepath.join(directory, "build.avm")
-    use Nil <- try_step("Building the avm file...", fn() {
+    use Nil <- try_step("Building the 'avm' file...", fn() {
       bundle_beam_files(project, output_path)
     })
-    use Nil <- try_step("Flashing the avm file into the device...", fn() {
+    use Nil <- try_step("Flashing the 'avm' file into the device...", fn() {
       esp_flash_to_device(project, esptool, output_path, port, baud)
     })
     Ok(Nil)
@@ -200,7 +200,7 @@ fn do_build(output_file: Option(String)) -> Result(String, Error) {
       project.root_directory
       |> filepath.join(project.name <> ".avm")
   }
-  use Nil <- try_step("Building the avm file...", fn() {
+  use Nil <- try_step("Building the 'avm' file...", fn() {
     bundle_beam_files(project, output_path)
   })
 
@@ -253,7 +253,7 @@ fn error_to_string(error: Error) -> String {
     CannotSpawnEsptool -> "cannot flash to device"
     CannotListBeamFiles(_)
     | CannotReadPackageInterface(_)
-    | CannotParsePackageInterface(_) -> "cannot build the avm file"
+    | CannotParsePackageInterface(_) -> "cannot build the 'avm' file"
   }
 
   let body = case error {
@@ -306,7 +306,7 @@ fn error_to_string(error: Error) -> String {
     // able to run `gleam` if any of these were to take place!
     CannotListBeamFiles(_) ->
       "An unexpected error while trying to figure out the files to include "
-      <> "in the avm script."
+      <> "in the 'avm' file."
     CannotFindGleamExecutable -> "Make sure 'gleam' is in your path."
     CannotSpawnGleamCompiler ->
       "I couldn't check if your project has any compilation errors.\n"
