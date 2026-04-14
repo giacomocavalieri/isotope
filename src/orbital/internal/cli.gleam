@@ -77,7 +77,7 @@ pub fn parse(args: List(String)) -> Result(Command, Error) {
     // "list" too since it only needs the help flag!
     Ok(hoist.Args(arguments: ["list"], flags:)) ->
       Ok(List(
-        input_file: option.from_result(find_flag_value(flags, "input-file")),
+        input_file: option.from_result(find_flag_value(flags, "file")),
         help: toggled(flags, "help"),
       ))
 
