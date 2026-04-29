@@ -294,7 +294,7 @@ pub fn usage_text() -> Document {
     doc.lines(2),
     doc.from_string(ansi.magenta("Flags:")),
     doc.line,
-    command_line("  -v, --version  ", "print orbital's version"),
+    flag_line("  -v, --version  ", "print orbital's version"),
   ]
   |> doc.concat
   |> doc.group
@@ -318,26 +318,26 @@ pub fn flash_help_text(description: Bool) -> Document {
     doc.from_string(ansi.magenta("Platforms:")),
     doc.line,
     command_line("  esp32  ", "this will require `esptool` installed"),
-    doc.lines(2),
-    doc.from_string(ansi.magenta("Flags:")),
     doc.line,
-    command_line(
-      "  -p, --port     <STRING>  ",
+    flag_line(
+      "    -p, --port     <STRING>  ",
       "the path where to find the device",
     ),
     doc.line,
-    command_line_with_default(
-      "  -b, --baud     <INT>     ",
+    flag_line_with_default(
+      "    -b, --baud     <INT>     ",
       "the baud used when flashing the device",
       "921_600",
     ),
     doc.line,
-    command_line(
-      "  -d, --dry-run            ",
+    flag_line(
+      "    -d, --dry-run            ",
       "only show the command used to flash the device",
     ),
+    doc.lines(2),
+    doc.from_string(ansi.magenta("Flags:")),
     doc.line,
-    command_line("  -h, --help               ", "show this help text"),
+    flag_line("  -h, --help               ", "show this help text"),
   ]
   |> doc.concat
   |> doc.group
@@ -368,13 +368,13 @@ pub fn build_help_text(description: Bool) -> Document {
     doc.lines(2),
     doc.from_string(ansi.magenta("Flags:")),
     doc.line,
-    command_line_with_default(
+    flag_line_with_default(
       "  -o, --output-file  <PATH>  ",
       "the path to write the 'avm' file to",
       "\"name_of_your_project.avm\"",
     ),
     doc.line,
-    command_line("  -h, --help                 ", "show this help text"),
+    flag_line("  -h, --help                 ", "show this help text"),
   ]
   |> doc.concat
 }
@@ -396,13 +396,13 @@ pub fn list_help_text(description: Bool) -> Document {
     doc.lines(2),
     doc.from_string(ansi.magenta("Flags:")),
     doc.line,
-    command_line_with_default(
+    flag_line_with_default(
       "  -f, --file  <PATH>  ",
       "the path to the 'avm' file",
       "\"name_of_your_project.avm\"",
     ),
     doc.line,
-    command_line("  -h, --help          ", "show this help text"),
+    flag_line("  -h, --help          ", "show this help text"),
   ]
   |> doc.concat
 }
@@ -419,13 +419,21 @@ pub fn help_text_for_state(state: ParsingState) -> Document {
 
 fn command_line(name: String, description: String) -> Document {
   doc.concat([
+    invisible_green(name),
+    flex_text(description)
+      |> doc.nest(by: string.length(name)),
+  ])
+}
+
+fn flag_line(name: String, description: String) -> Document {
+  doc.concat([
     doc.from_string(name),
     flex_text(description)
       |> doc.nest(by: string.length(name)),
   ])
 }
 
-fn command_line_with_default(
+fn flag_line_with_default(
   name: String,
   description: String,
   default: String,
@@ -544,4 +552,12 @@ pub fn error_to_document(error: Error) -> Document {
         help_text_for_state(state),
       ])
   }
+}
+
+fn invisible_green(text: String) -> Document {
+  doc.concat([
+    doc.zero_width_string("\u{1b}[0;32m"),
+    doc.from_string(text),
+    doc.zero_width_string("\u{1b}[0m"),
+  ])
 }
