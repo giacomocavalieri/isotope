@@ -12,20 +12,21 @@ pub type Command {
   Version
   Usage
   Help
-  Flash(
-    platform: Platform,
-    port: String,
-    baud: Option(Int),
-    dry_run: Bool,
-    help: Bool,
-  )
+  Flash(platform: FlashPlatform, help: Bool)
   Build(output_file: Option(String), help: Bool)
   List(input_file: Option(String), help: Bool)
+}
+
+pub type FlashPlatform {
+  Esp32(port: String, baud: Option(Int), dry_run: Bool)
+  Pico(port: String)
 }
 
 pub type ParsingState {
   ParsingBase
   ParsingFlash
+  ParsingFlashEsp32
+  ParsingFlashPico
   ParsingHelp
   ParsingBuild
   ParsingList
@@ -33,10 +34,6 @@ pub type ParsingState {
 
 pub type CustomError {
   UnknownCommand(command: String)
-}
-
-pub type Platform {
-  Esp32
 }
 
 pub type Error {
@@ -86,38 +83,35 @@ pub fn parse(args: List(String)) -> Result(Command, Error) {
     // Then we have to make sure that the "port" flag exists, that is mandatory.
     // Finally, if "baud" was provided we need to validate that it's an Int.
     Ok(hoist.Args(arguments: ["flash", ..rest], flags:)) ->
-      case toggled(flags, "help") {
-        True ->
+      case toggled(flags, "help"), rest {
+        True, _ ->
           Ok(Flash(
-            platform: Esp32,
-            port: "port",
-            baud: None,
-            dry_run: False,
+            platform: Esp32(port: "port", baud: None, dry_run: False),
             help: True,
           ))
 
-        False ->
-          case rest {
-            [] ->
-              Error(MissingRequiredPositionalArgument(
-                ParsingFlash,
-                "[PLATFORM]",
-              ))
-            [_, unknown, ..] ->
-              UnknownCommand(unknown)
-              |> hoist.CustomError
-              |> HoistError(state: parsing_state)
-              |> Error
+        False, [] ->
+          Error(MissingRequiredPositionalArgument(ParsingFlash, "[PLATFORM]"))
 
-            ["esp32"] -> {
-              use port <- require_flag(flags, ParsingFlash, "port")
-              use baud <- optional_int_flag(flags, ParsingFlash, "baud")
-              let dry_run = toggled(flags, "dry-run")
-              let help = toggled(flags, "help")
-              Ok(Flash(platform: Esp32, port:, baud:, dry_run:, help:))
-            }
-            [platform] -> Error(InvalidFlashPlatform(platform))
-          }
+        False, [_, unknown, ..] ->
+          UnknownCommand(unknown)
+          |> hoist.CustomError
+          |> HoistError(state: parsing_state)
+          |> Error
+
+        False, ["pico"] -> {
+          use port <- require_flag(flags, ParsingFlash, "port")
+          Ok(Flash(platform: Pico(port:), help: False))
+        }
+
+        False, ["esp32"] -> {
+          use port <- require_flag(flags, ParsingFlash, "port")
+          use baud <- optional_int_flag(flags, ParsingFlash, "baud")
+          let dry_run = toggled(flags, "dry-run")
+          Ok(Flash(platform: Esp32(port:, baud:, dry_run:), help: False))
+        }
+
+        False, [platform] -> Error(InvalidFlashPlatform(platform))
       }
 
     // Any other command is invalid. Hoist should prevent against this, but
@@ -141,7 +135,11 @@ fn parse_args(
     case command, state {
       // The base cli only accepts "help", or "flash" as commands.
       "build", ParsingBase -> Ok(#(ParsingBuild, build_flags()))
-      "flash", ParsingBase -> Ok(#(ParsingFlash, flash_flags()))
+
+      "flash", ParsingBase -> Ok(#(ParsingFlash, base_flash_flags()))
+      "esp32", ParsingFlash -> Ok(#(ParsingFlashEsp32, esp_flash_flags()))
+      "pico", ParsingFlash -> Ok(#(ParsingFlashPico, pico_flash_flags()))
+
       "list", ParsingBase -> Ok(#(ParsingList, list_flags()))
       "help", ParsingBase -> Ok(#(ParsingHelp, help_flags()))
       _, ParsingBase -> Error(UnknownCommand(command:))
@@ -158,7 +156,8 @@ fn parse_args(
       // The "flash" command takes positional arguments, but no subcommands, so
       // there's no need to special case any of them as they don't change the
       // accepted flags
-      _, ParsingFlash -> Ok(#(ParsingFlash, flags))
+      _, ParsingFlash | _, ParsingFlashEsp32 | _, ParsingFlashPico ->
+        Ok(#(state, flags))
     }
   })
 }
@@ -205,8 +204,18 @@ fn list_flags() -> ValidatedFlagSpecs {
   list_avm_flags
 }
 
-fn flash_flags() -> ValidatedFlagSpecs {
+fn base_flash_flags() -> ValidatedFlagSpecs {
   let assert Ok(flash_flags) =
+    hoist.validate_flag_specs([
+      hoist.new_flag("help")
+      |> hoist.with_short_alias("h")
+      |> hoist.as_toggle,
+    ])
+  flash_flags
+}
+
+fn esp_flash_flags() -> ValidatedFlagSpecs {
+  let assert Ok(esp_flash_flags) =
     hoist.validate_flag_specs([
       hoist.new_flag("port")
         |> hoist.with_short_alias("p"),
@@ -219,7 +228,16 @@ fn flash_flags() -> ValidatedFlagSpecs {
         |> hoist.with_short_alias("h")
         |> hoist.as_toggle,
     ])
-  flash_flags
+  esp_flash_flags
+}
+
+fn pico_flash_flags() -> ValidatedFlagSpecs {
+  let assert Ok(pico_flash_flags) =
+    hoist.validate_flag_specs([
+      hoist.new_flag("port")
+      |> hoist.with_short_alias("p"),
+    ])
+  pico_flash_flags
 }
 
 // --- HELPERS TO WORK WITH FLAGS ----------------------------------------------
@@ -321,7 +339,7 @@ pub fn flash_help_text(description: Bool) -> Document {
     doc.line,
     flag_line(
       "    -p, --port     <STRING>  ",
-      "the path where to find the device",
+      "the path where to find the esp device",
     ),
     doc.line,
     flag_line_with_default(
@@ -335,7 +353,14 @@ pub fn flash_help_text(description: Bool) -> Document {
       "only show the command used to flash the device",
     ),
     doc.lines(2),
-    doc.from_string(ansi.magenta("Flags:")),
+    command_line("  pico   ", ""),
+    doc.line,
+    flag_line(
+      "    -p, --port     <STRING>  ",
+      "the path where to find the pico device",
+    ),
+    doc.lines(2),
+    doc.from_string(ansi.magenta("Other flags:")),
     doc.line,
     flag_line("  -h, --help               ", "show this help text"),
   ]
@@ -410,7 +435,8 @@ pub fn list_help_text(description: Bool) -> Document {
 pub fn help_text_for_state(state: ParsingState) -> Document {
   case state {
     ParsingBase -> usage_text()
-    ParsingFlash -> flash_help_text(False)
+    ParsingFlash | ParsingFlashEsp32 | ParsingFlashPico ->
+      flash_help_text(False)
     ParsingHelp -> usage_text()
     ParsingBuild -> build_help_text(False)
     ParsingList -> list_help_text(False)
@@ -499,9 +525,8 @@ pub fn error_to_document(error: Error) -> Document {
     InvalidFlashPlatform(platform:) ->
       doc.concat([
         error_heading("invalid platform"),
-        flex_text("'" <> platform <> "' is not a supported platform."),
         doc.line,
-        flex_text("The only supported platform at the moment is 'esp32'."),
+        flex_text("'" <> platform <> "' is not a supported platform."),
         doc.lines(2),
         help_text_for_state(ParsingFlash),
       ])
@@ -509,6 +534,14 @@ pub fn error_to_document(error: Error) -> Document {
     HoistError(state:, error: hoist.UnknownFlag(flag)) ->
       doc.concat([
         error_heading("unknown flag '" <> flag <> "'"),
+        case state {
+          ParsingFlash ->
+            doc.concat([
+              doc.line,
+              doc.from_string("Hint: make sure to first specify a platform."),
+            ])
+          _ -> doc.empty
+        },
         doc.lines(2),
         help_text_for_state(state),
       ])

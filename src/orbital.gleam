@@ -11,7 +11,7 @@ import gleam/package_interface
 import gleam/result
 import gleam/string
 import gleam_community/ansi
-import orbital/internal/cli.{type Platform, Esp32}
+import orbital/internal/cli
 import orbital/internal/executable.{type ExecutablePath}
 import orbital/internal/project.{
   type Project, CannotParseGleamToml, CannotReadGleamToml, CannotReadProjectName,
@@ -46,19 +46,49 @@ pub fn main() -> Nil {
     Ok(cli.Usage) -> print_document(cli.usage_text())
     Ok(cli.Help) -> print_document(cli.usage_text())
     Ok(cli.Version) -> io.println(cli.orbital_version)
-    Ok(cli.Flash(help: True, ..)) -> print_document(cli.flash_help_text(True))
-    Ok(cli.Flash(help: False, dry_run: True, platform:, port:, baud:)) ->
-      flash_dry_run(platform, port, baud)
-    Ok(cli.Flash(help: False, dry_run: False, platform:, port:, baud:)) ->
-      flash(platform, port, baud)
+
     Ok(cli.Build(help: True, ..)) -> print_document(cli.build_help_text(True))
     Ok(cli.Build(output_file:, help: False)) -> build(output_file)
     Ok(cli.List(help: True, ..)) -> print_document(cli.list_help_text(True))
     Ok(cli.List(input_file:, help: False)) -> list(input_file)
+
+    // Flashing is the more involved step, and changes based on the device.
+    Ok(cli.Flash(help: True, ..)) -> print_document(cli.flash_help_text(True))
+    Ok(cli.Flash(help: False, platform:)) -> flash(platform)
+    //   flash_esp32_dry_run(port, baud)
+    // Ok(cli.Flash(help: False, platform: cli.Esp32(dry_run: False, port:, baud:))) ->
+    //   flash_esp32(port, baud)
+    // Ok(cli.Flash(help: False, platform: cli.Pico(port:))) -> flash_pico(port)
   }
 }
 
-fn flash_dry_run(_platform: Platform, port: String, baud: Option(Int)) -> Nil {
+fn flash(platform: cli.FlashPlatform) -> Nil {
+  let flashed_device = case platform {
+    cli.Esp32(port:, baud:, dry_run: True) -> {
+      flash_esp32_dry_run(port, baud)
+      Ok(False)
+    }
+    cli.Esp32(port:, baud:, dry_run: False) -> {
+      use _ <- result.try(do_flash_esp32(port, baud))
+      Ok(True)
+    }
+    cli.Pico(port:) -> {
+      use _ <- result.try(do_flash_pico(port))
+      Ok(True)
+    }
+  }
+
+  case flashed_device {
+    Ok(True) -> io.println(ansi.magenta("⚛️  flashed the device!"))
+    Ok(False) -> Nil
+    Error(error) -> {
+      io.println(error_to_string(error))
+      exit(1)
+    }
+  }
+}
+
+fn flash_esp32_dry_run(port: String, baud: Option(Int)) -> Nil {
   let baud = option.unwrap(baud, default_baud) |> int.to_string
   let command =
     [
@@ -72,16 +102,6 @@ fn flash_dry_run(_platform: Platform, port: String, baud: Option(Int)) -> Nil {
     |> string.join(with: "\n")
 
   io.println("To flash the device I would run this command:\n\n" <> command)
-}
-
-fn flash(platform: Platform, port: String, baud: Option(Int)) -> Nil {
-  case do_flash(platform, port, baud) {
-    Ok(_) -> io.println(ansi.magenta("⚛️  flashed the device!"))
-    Error(error) -> {
-      io.println(error_to_string(error))
-      exit(1)
-    }
-  }
 }
 
 fn build(output_file: Option(String)) -> Nil {
@@ -109,62 +129,24 @@ fn list(input_file: Option(String)) -> Nil {
   }
 }
 
-fn do_flash(
-  platform: Platform,
-  port: String,
-  baud: Option(Int),
-) -> Result(Nil, Error) {
-  // TODO: For now the platform is not needed, we only support one.
-  // This is so I won't forget to update the code once we support more!
-  let Esp32 = platform
-
-  // In future, if supporting multiple platform we'd only required the specific
-  // tool needed for the given platform. For now esp is the only supported one
-  // so it's fair to always require `esptool`
+fn do_flash_esp32(port: String, baud: Option(Int)) -> Result(Nil, Error) {
+  // To flash to an esp device we need esptool to be installed and available in
+  // the path!
   use esptool <- result.try(
     executable.find("esptool")
     |> result.replace_error(CannotFindEsptoolExecutable),
   )
 
-  // In order to do anything useful we need to make sure Gleam is installed
-  // (we'll need to run it to compile the project), and that we're inside a
-  // Gleam project.
-  use gleam <- result.try(
-    executable.find("gleam")
-    |> result.replace_error(CannotFindGleamExecutable),
-  )
-  use project <- result.try(
-    project.load()
-    |> result.map_error(CannotIdentifyProject),
-  )
-
-  // The gleam compiler doesn't recompile the root project when running a module
-  // from a dependency (`gleam run -m orbital`).
-  // This is quite nice as it allows us to run deps even if our own code is not
-  // in a compiling state.
-  // However, in our case we actually want to make sure that when "orbital" is
-  // running it is using the most recent version of the code: it would be quite
-  // confusing to run `gleam run -m orbital` and it flushes an outdated version
-  // of the code because we forgot to run `gleam build && gleam run -m orbital`.
-  // So we start by compiling the root project:
-  use Nil <- try_step("Compiling your Gleam project...", fn() {
-    compile(gleam, project)
-  })
-  use Nil <- try_step("Looking for a suitable entrypoint...", fn() {
-    validate_entrypoint(gleam, project)
-  })
-
-  // If the root project was compiled successufully we're good to go: we can
-  // now pack all the produced `.beam` files into an `.avm` file ready to be
-  // flushed into the device.
   let outcome = {
     use directory <- temporary.create(temporary.directory())
     let output_path = filepath.join(directory, "build.avm")
-    use Nil <- try_step("Building the 'avm' file...", fn() {
-      bundle_beam_files(project, output_path)
-    })
+    use output_path <- result.try(do_build(Some(output_path)))
+
+    // If the root project was compiled successufully we're good to go: we can
+    // now pack all the produced `.beam` files into an `.avm` file ready to be
+    // flushed into the device.
     use Nil <- try_step("Flashing the 'avm' file into the device...", fn() {
-      esp_flash_to_device(project, esptool, output_path, port, baud)
+      esp_flash_to_device(esptool, output_path, port, baud)
     })
     Ok(Nil)
   }
@@ -175,6 +157,29 @@ fn do_flash(
   }
 }
 
+fn do_flash_pico(port: String) -> Result(Nil, Error) {
+  let outcome = {
+    use directory <- temporary.create(temporary.directory())
+    let output_path = filepath.join(directory, "build.avm")
+    use output_path <- result.try(do_build(Some(output_path)))
+
+    // If the root project was compiled successufully we're good to go: we can
+    // now pack all the produced `.beam` files into an `.avm` file ready to be
+    // flushed into the device.
+    use Nil <- try_step("Flashing the 'avm' file into the device...", fn() {
+      simplifile.copy(src: output_path, dest: filepath.join(port, "build.utf2"))
+      |> result.map_error(CannotFlashPico)
+    })
+    Ok(Nil)
+  }
+
+  case outcome {
+    Ok(result) -> result
+    Error(reason) -> Error(CannotFlashPico(reason:))
+  }
+}
+
+/// Returns the path to the built file!
 fn do_build(output_file: Option(String)) -> Result(String, Error) {
   // In order to do anything useful we need to make sure Gleam is installed
   // (we'll need to run it to compile the project), and that we're inside a
@@ -265,7 +270,8 @@ type Error {
   EntrypointFunctionHasWrongArity(module: String)
   CannotFindEsptoolExecutable
 
-  CannotFlashWithEsptool(status_code: Int)
+  CannotFlashWithEsptool(esptool_status_code: Int)
+  CannotFlashPico(reason: simplifile.FileError)
   EsptoolCannotOpenPort(port: String)
 }
 
@@ -276,7 +282,7 @@ fn error_to_string(error: Error) -> String {
     EntrypointFunctionHasWrongArity(_) -> "wrong entrypoint function"
     CannotCompileProject -> "invalid Gleam project"
     CannotFindEsptoolExecutable -> "missing 'esptool'"
-    CannotFlashWithEsptool(_) | EsptoolCannotOpenPort(_) ->
+    CannotFlashWithEsptool(_) | EsptoolCannotOpenPort(_) | CannotFlashPico(_) ->
       "cannot flash device"
     OutputFileIsDirectory(_) -> "invalid output file"
     CannotReadAvmFile(_) -> "cannot read the 'avm' file"
@@ -324,10 +330,13 @@ fn error_to_string(error: Error) -> String {
       <> "Hint: you can find installation instructions at\n"
       <> "https://docs.espressif.com/projects/esptool/en/latest/esp32/installation.html"
 
-    CannotFlashWithEsptool(status_code:) ->
+    CannotFlashWithEsptool(esptool_status_code:) ->
       "The call to 'esptool' failed with status code: "
-      <> int.to_string(status_code)
+      <> int.to_string(esptool_status_code)
       <> "."
+
+    CannotFlashPico(reason: _) ->
+      "I couldn't flash your pico device because of an unexpected error."
 
     EsptoolCannotOpenPort(port:) ->
       "The port '"
@@ -493,7 +502,6 @@ fn packbeam_create(
 fn packbeam_list(input_path input_path: String) -> Result(List(String), Nil)
 
 fn esp_flash_to_device(
-  project: Project,
   esptool: ExecutablePath,
   output_path: String,
   port: String,
@@ -501,7 +509,7 @@ fn esp_flash_to_device(
 ) -> Result(Nil, Error) {
   let baud = option.unwrap(baud, default_baud) |> int.to_string
   let outcome =
-    executable.run(esptool, project.root_directory, [
+    executable.run(esptool, ".", [
       "--chip", "auto", "--port", port, "--baud", baud, "--before",
       "default-reset", "--after", "hard-reset", "write-flash", "-u",
       "--flash-mode", "keep", "--flash-freq", "keep", "--flash-size", "detect",
